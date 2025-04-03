@@ -20,7 +20,7 @@ cd fii_practic_grafana
 
 ### 2. Start all services
 ```bash
-docker-compose up --build
+docker-compose up --build -d
 ```
 This will spin up:
 - NGINX (web server with simulated latency)
