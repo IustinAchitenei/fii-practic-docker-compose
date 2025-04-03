@@ -1,0 +1,91 @@
+services:
+  nginx:
+    build: ./nginx
+    ports:
+      - "8080:80"
+    networks:
+      - observability
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:0.11.0
+    command:
+      - '-nginx.scrape-uri=http://nginx/stub_status'
+    depends_on:
+      - nginx
+    ports:
+      - "9113:9113" 
+    networks:
+      - observability
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - "8081:8081"
+    command: "--port 8081"
+    networks:
+      - observability
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - observability
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    networks:
+      - observability
+
+  locust:
+    image: locustio/locust
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./locust:/mnt/locust
+    working_dir: /mnt/locust
+    command: -f locustfile.py --host=http://nginx
+    networks:
+      - observability
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    networks:
+      - observability
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+  
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.17.9
+    user: root
+    depends_on:
+      - elasticsearch
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+    command: ["-strict.perms=false"]
+    networks:
+      - observability
+
+networks:
+  observability:
+
+volumes:
+  esdata:
