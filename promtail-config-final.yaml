@@ -1,0 +1,88 @@
+﻿# Promtail configuration for Docker container logs with specialized nginx log parsing
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Configuration specifically for NGINX logs
+  - job_name: nginx
+    static_configs:
+    - targets:
+        - localhost
+      labels:
+        job: nginx
+        service: nginx
+        __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      # Extract log and stream from the JSON container logs
+      - json:
+          expressions:
+            log: log
+            stream: stream
+      
+      # Extract HTTP method, path and status code from nginx log format
+      - regex:
+          source: log
+          expression: '"(?P<http_method>GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH) (?P<http_path>[^ ]*) HTTP.*" (?P<status_code>[0-9]{3})'
+      
+      # Only include logs that have HTTP method, path and status code
+      - match:
+          selector: '{http_method=~".+", http_path=~".+", status_code=~".+"}'
+          stages:
+            # Add all extracted fields as labels
+            - labels:
+                http_method:
+                http_path:
+                status_code:
+            
+            # Generate metrics for monitoring
+            - metrics:
+                http_requests_total:
+                  type: Counter
+                  description: "Total HTTP requests"
+                  config:
+                    action: inc
+                    match_all: true
+                    labels:
+                      method: '{{.http_method}}'
+                      path: '{{.http_path}}'
+                      status: '{{.status_code}}'
+                      service: 'nginx'
+      
+      # Output the log content
+      - output:
+          source: log
+  
+  # Configuration for all other container logs
+  - job_name: docker
+    static_configs:
+    - targets:
+        - localhost
+      labels:
+        job: docker
+        __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      # Extract log and stream from the JSON container logs
+      - json:
+          expressions:
+            log: log
+            stream: stream
+      
+      # Extract container_id from the filename
+      - regex:
+          expression: '^/var/lib/docker/containers/(?P<container_id>[^/]+)/.*$'
+          source: filename
+      
+      # Add container_id as a label
+      - labels:
+          container_id:
+      
+      # Output the log content
+      - output:
+          source: log
